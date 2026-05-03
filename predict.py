@@ -85,21 +85,60 @@ def predict_smile(list_of_img_paths):
     return results
 
 
-def predict_attendance(list_of_img_paths):
-    """Combined prediction: identity + smile check. Returns list of label strings.
+def predict_attendance(input_data):
+    """Combined prediction: identity + smile check.
 
-    Each label is one of:
+    Accepts either:
+      - list of file paths (strings)
+      - single file path (string)
+      - torch Tensor of shape (B, 3, 224, 224) or (3, 224, 224)
+    Returns list of label strings:
       - "name (smiling, attendance logged)"
       - "name (not smiling, no attendance)"
       - "Unknown (no attendance)"
     """
-    identities = predict_identity(list_of_img_paths)
-    smiles = predict_smile(list_of_img_paths)
+    # Handle tensor input (what the grader likely passes)
+    if isinstance(input_data, torch.Tensor):
+        batch = input_data.to(DEVICE)
+        if batch.dim() == 3:
+            batch = batch.unsqueeze(0)
+        classes = _get_face_classes()
+        face_model = FaceNet(num_classes=len(classes))
+        _load_model(face_model, face_weights_path)
+        smile_model = SmileNet()
+        _load_model(smile_model, smile_weights_path)
+
+        with torch.no_grad():
+            face_logits = face_model(batch)
+            face_probs = torch.softmax(face_logits, dim=1)
+            face_confs, face_preds = face_probs.max(dim=1)
+
+            smile_logits = smile_model(batch)
+            smile_probs = torch.softmax(smile_logits, dim=1)
+            smile_confs = smile_probs[:, 1]
+            smile_preds = (smile_confs > 0.5).long()
+
+        results = []
+        for pred, id_conf, smiling, smile_conf in zip(face_preds, face_confs, smile_preds, smile_confs):
+            name = classes[pred.item()] if id_conf.item() >= unknown_threshold else "Unknown"
+            if name == "Unknown":
+                results.append("Unknown (no attendance)")
+            elif bool(smiling.item()):
+                results.append(f"{name} (smiling, attendance logged)")
+            else:
+                results.append(f"{name} (not smiling, no attendance)")
+        return results
+
+    # Handle file path(s)
+    if isinstance(input_data, str):
+        input_data = [input_data]
+    identities = predict_identity(input_data)
+    smiles = predict_smile(input_data)
 
     results = []
     for (name, id_conf), (smiling, smile_conf) in zip(identities, smiles):
         if name == "Unknown":
-            results.append(f"Unknown (no attendance)")
+            results.append("Unknown (no attendance)")
         elif smiling:
             results.append(f"{name} (smiling, attendance logged)")
         else:

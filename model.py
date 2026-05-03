@@ -51,6 +51,10 @@ class SmileInModel(nn.Module):
             self.smile_net.load_state_dict(torch.load(smile_weights_path, map_location=DEVICE, weights_only=True))
 
     def forward(self, x):
+        # Return face logits only for compatibility with train_model + CrossEntropyLoss
+        return self.face_net(x)
+
+    def forward_both(self, x):
         face_logits = self.face_net(x)
         smile_logits = self.smile_net(x)
         return face_logits, smile_logits
