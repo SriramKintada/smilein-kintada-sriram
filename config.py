@@ -9,7 +9,9 @@ input_channels = 3
 face_batch_size = 16
 smile_batch_size = 32
 
-face_epochs = 20
+# Aliases matching professor's expected names
+batchsize = face_batch_size
+epochs = face_epochs = 20
 smile_epochs = 10
 
 face_lr = 1e-4
@@ -29,5 +31,6 @@ smile_data_dir = "data/smile"
 checkpoints_dir = "checkpoints"
 face_weights_path = "checkpoints/face_net_weights.pth"
 smile_weights_path = "checkpoints/smile_net_weights.pth"
+final_weights_path = "checkpoints/final_weights.pth"
 
 attendance_csv = "attendance.csv"

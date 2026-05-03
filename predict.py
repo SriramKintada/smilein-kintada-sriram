@@ -9,7 +9,7 @@ from config import (
     face_weights_path, smile_weights_path,
     face_data_dir,
 )
-from model import SmileInModel, FaceNet, SmileNet
+from model import FaceNet, SmileNet
 
 
 infer_transform = transforms.Compose([
@@ -38,7 +38,7 @@ def _get_face_classes():
     ])
 
 
-def _load_model(model, path, num_face_classes):
+def _load_model(model, path):
     if os.path.exists(path):
         model.load_state_dict(torch.load(path, map_location=DEVICE, weights_only=True))
     model.to(DEVICE)
@@ -47,10 +47,10 @@ def _load_model(model, path, num_face_classes):
 
 
 def predict_identity(list_of_img_paths):
+    """Predict the identity of each face image. Returns list of (name, confidence)."""
     classes = _get_face_classes()
     model = FaceNet(num_classes=len(classes))
-    _load_model(model, face_weights_path, len(classes))
-    model.eval()
+    _load_model(model, face_weights_path)
 
     batch = _load_batch(list_of_img_paths)
     with torch.no_grad():
@@ -68,9 +68,9 @@ def predict_identity(list_of_img_paths):
 
 
 def predict_smile(list_of_img_paths):
+    """Predict whether each face image shows a smile. Returns list of (is_smiling, confidence)."""
     model = SmileNet()
-    _load_model(model, smile_weights_path, 0)
-    model.eval()
+    _load_model(model, smile_weights_path)
 
     batch = _load_batch(list_of_img_paths)
     with torch.no_grad():
@@ -86,22 +86,22 @@ def predict_smile(list_of_img_paths):
 
 
 def predict_attendance(list_of_img_paths):
+    """Combined prediction: identity + smile check. Returns list of label strings.
+
+    Each label is one of:
+      - "name (smiling, attendance logged)"
+      - "name (not smiling, no attendance)"
+      - "Unknown (no attendance)"
+    """
     identities = predict_identity(list_of_img_paths)
     smiles = predict_smile(list_of_img_paths)
 
     results = []
     for (name, id_conf), (smiling, smile_conf) in zip(identities, smiles):
         if name == "Unknown":
-            attendance = False
-        elif not smiling:
-            attendance = False
+            results.append(f"Unknown (no attendance)")
+        elif smiling:
+            results.append(f"{name} (smiling, attendance logged)")
         else:
-            attendance = True
-        results.append({
-            "name": name,
-            "identity_confidence": round(id_conf, 4),
-            "smiling": smiling,
-            "smile_confidence": round(smile_conf, 4),
-            "attendance": attendance,
-        })
+            results.append(f"{name} (not smiling, no attendance)")
     return results

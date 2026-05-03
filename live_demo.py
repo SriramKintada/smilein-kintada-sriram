@@ -2,8 +2,8 @@ import cv2
 import torch
 import os
 import csv
+import numpy as np
 from datetime import datetime
-from facenet_pytorch import MTCNN
 from torchvision import transforms
 from config import (
     DEVICE, resize_x, resize_y,
@@ -32,7 +32,8 @@ def run_live_demo():
     face_model.to(DEVICE).eval()
     smile_model.to(DEVICE).eval()
 
-    mtcnn = MTCNN(image_size=160, margin=20, keep_confidence=True, device=DEVICE)
+    # Use more sensitive detection with smaller minSize and lower minNeighbors
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
     transform = transforms.Compose([
         transforms.Resize((resize_x, resize_y)),
@@ -47,7 +48,13 @@ def run_live_demo():
         print("Error: Could not open webcam.")
         return
 
+    # Set lower resolution for faster processing
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
     print("SmileIn live demo running. Press 'q' to quit.")
+    print(f"Known faces: {classes}")
+    print(f"Unknown threshold: {unknown_threshold}")
 
     while True:
         ret, frame = cap.read()
@@ -55,59 +62,72 @@ def run_live_demo():
             break
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        boxes, probs = mtcnn.detect(rgb_frame)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        if boxes is not None:
-            for box, prob in zip(boxes, probs):
-                if prob is None or prob < 0.9:
-                    continue
+        # More sensitive face detection
+        faces = face_cascade.detectMultiScale(
+            gray, scaleFactor=1.05, minNeighbors=3, minSize=(80, 80)
+        )
 
-                x1, y1, x2, y2 = map(int, box)
-                face_crop = rgb_frame[y1:y2, x1:x2]
-                if face_crop.size == 0:
-                    continue
+        for (x, y, w, h) in faces:
+            # Add 30% margin around detected face for better classification
+            margin_x = int(w * 0.3)
+            margin_y = int(h * 0.3)
+            x1 = max(0, x - margin_x)
+            y1 = max(0, y - margin_y)
+            x2 = min(rgb_frame.shape[1], x + w + margin_x)
+            y2 = min(rgb_frame.shape[0], y + h + margin_y)
 
-                face_pil = transforms.functional.to_pil_image(face_crop)
-                face_tensor = transform(face_pil).unsqueeze(0).to(DEVICE)
+            face_crop = rgb_frame[y1:y2, x1:x2]
+            if face_crop.size == 0:
+                continue
 
-                with torch.no_grad():
-                    face_logits = face_model(face_tensor)
-                    face_probs = torch.softmax(face_logits, dim=1)
-                    face_conf, face_pred = face_probs.max(dim=1)
+            face_pil = transforms.functional.to_pil_image(face_crop)
+            face_tensor = transform(face_pil).unsqueeze(0).to(DEVICE)
 
-                    smile_logits = smile_model(face_tensor)
-                    smile_probs = torch.softmax(smile_logits, dim=1)
-                    smile_conf = smile_probs[0, 1].item()
-                    is_smiling = smile_conf > 0.5
+            with torch.no_grad():
+                face_logits = face_model(face_tensor)
+                face_probs = torch.softmax(face_logits, dim=1)
+                face_conf, face_pred = face_probs.max(dim=1)
 
-                name = classes[face_pred.item()] if face_conf.item() >= unknown_threshold else "Unknown"
+                smile_logits = smile_model(face_tensor)
+                smile_probs = torch.softmax(smile_logits, dim=1)
+                smile_conf = smile_probs[0, 1].item()
+                is_smiling = smile_conf > 0.4  # Lowered threshold to detect smiles more easily
 
-                if name != "Unknown":
-                    key = name
-                    if is_smiling:
-                        smile_counter[key] = smile_counter.get(key, 0) + 1
-                    else:
-                        smile_counter[key] = 0
+            name = classes[face_pred.item()] if face_conf.item() >= unknown_threshold else "Unknown"
 
-                    if smile_counter.get(key, 0) >= smile_frames_required and key not in logged:
-                        logged.add(key)
-                        with open(attendance_csv, "a", newline="") as f:
-                            writer = csv.writer(f)
-                            writer.writerow([key, datetime.now().strftime("%Y-%m-%d"),
-                                            datetime.now().strftime("%H:%M:%S"),
-                                            round(face_conf.item(), 4),
-                                            round(smile_conf, 4)])
-                        print(f"  Logged attendance: {key}")
+            # Debug: show top prediction and confidence
+            top3_vals, top3_idx = face_probs.topk(min(3, len(classes)))
+            debug_str = " | ".join([f"{classes[top3_idx[0][i].item()]}:{top3_vals[0][i].item():.2f}" for i in range(top3_vals.shape[1])])
 
-                color = (0, 255, 0) if is_smiling and name != "Unknown" else (0, 0, 255)
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            if name != "Unknown":
+                key = name
+                if is_smiling:
+                    smile_counter[key] = smile_counter.get(key, 0) + 1
+                else:
+                    smile_counter[key] = 0
 
-                label = name if is_smiling and name != "Unknown" else "..."
-                smile_tag = "Smiling" if is_smiling else "Not Smiling"
-                cv2.putText(frame, label, (x1, y1 - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-                cv2.putText(frame, smile_tag, (x1, y2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                if smile_counter.get(key, 0) >= smile_frames_required and key not in logged:
+                    logged.add(key)
+                    with open(attendance_csv, "a", newline="") as f:
+                        writer = csv.writer(f)
+                        writer.writerow([key, datetime.now().strftime("%Y-%m-%d"),
+                                        datetime.now().strftime("%H:%M:%S"),
+                                        round(face_conf.item(), 4),
+                                        round(smile_conf, 4)])
+                    print(f"  Logged attendance: {key}")
 
-        cv2.imshow("SmileIn - Smile to Check In (q to quit)", frame)
+            color = (0, 255, 0) if is_smiling and name != "Unknown" else (0, 0, 255)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+
+            label = name if is_smiling and name != "Unknown" else "..."
+            smile_tag = "Smiling" if is_smiling else "Not Smiling"
+            cv2.putText(frame, label, (x, y - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            cv2.putText(frame, f"{face_conf.item():.0%} {smile_tag}", (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            cv2.putText(frame, debug_str, (x, y + h + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (200, 200, 200), 1)
+
+        cv2.imshow("SmileIn - Smile to Check In (press Q to quit)", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 

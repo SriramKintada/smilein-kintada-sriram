@@ -1,15 +1,19 @@
+# interface.py - standardized imports for grading
+# Replace MyCustomModel with the name of your model
 from model import SmileInModel as TheModel
 from model import FaceNet as TheFaceNet
 from model import SmileNet as TheSmileNet
+# change my_descriptively_named_train_function to
+# the function inside train.py that runs the training loop.
 from train import train_model as the_trainer
+# change cryptic_inf_f to the function inside predict.py that
+# can be called to generate inference on a single image/batch.
 from predict import predict_attendance as the_predictor
-from predict import predict_identity as the_identity_predictor
-from predict import predict_smile as the_smile_predictor
+# change UnicornImgDataset to your custom Dataset class.
 from dataset import FaceIdentityDataset as TheDataset
-from dataset import SmileDataset as TheSmileDataset
+# change unicornLoader to your custom dataloader
 from dataset import get_face_dataloader as the_dataloader
-from dataset import get_smile_dataloader as the_smile_dataloader
-from config import face_batch_size as the_batch_size
-from config import face_epochs as total_epochs
-from config import smile_batch_size as the_smile_batch_size
-from config import smile_epochs as total_smile_epochs
+# change batchsize, epochs to whatever your names are for these
+# variables inside the config.py file
+from config import batchsize as the_batch_size
+from config import epochs as total_epochs

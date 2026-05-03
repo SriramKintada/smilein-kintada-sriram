@@ -13,10 +13,12 @@ from config import (
 train_transform = transforms.Compose([
     transforms.Resize((resize_x, resize_y)),
     transforms.RandomHorizontalFlip(),
-    transforms.RandomRotation(15),
-    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1),
+    transforms.RandomRotation(20),
+    transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1),
+    transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
     transforms.ToTensor(),
     transforms.Normalize(imagenet_mean, imagenet_std),
+    transforms.RandomErasing(p=0.2, scale=(0.02, 0.1)),
 ])
 
 val_transform = transforms.Compose([
@@ -47,7 +49,7 @@ class FaceIdentityDataset(Dataset):
         for cls_name in self.classes:
             cls_dir = os.path.join(self.root_dir, cls_name)
             for fname in os.listdir(cls_dir):
-                if fname.lower().endswith((".jpg", ".jpeg", ".png")):
+                if fname.lower().endswith((".jpg", ".jpeg", ".png", ".pgm", ".bmp")):
                     samples.append((os.path.join(cls_dir, fname), self.class_to_idx[cls_name]))
         return samples
 
@@ -82,7 +84,7 @@ class SmileDataset(Dataset):
             if not os.path.isdir(cls_dir):
                 continue
             for fname in os.listdir(cls_dir):
-                if fname.lower().endswith((".jpg", ".jpeg", ".png")):
+                if fname.lower().endswith((".jpg", ".jpeg", ".png", ".pgm", ".bmp")):
                     samples.append((os.path.join(cls_dir, fname), self.class_to_idx[cls_name]))
         return samples
 
